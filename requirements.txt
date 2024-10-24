@@ -4,3 +4,7 @@ PyPDF2
 langchain_google_genai
 langchain
 langchain-community
+gpt4all
+openai
+sentence-transformers
+langchain-openai
