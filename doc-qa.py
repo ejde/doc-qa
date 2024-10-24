@@ -27,6 +27,7 @@ if model_choice == "Google Generative AI":
         st.stop()
     embeddings_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
     chat_model = ChatGoogleGenerativeAI(model='gemini-1.5-pro-latest', google_api_key=api_key, temperature=0.8)
+    print("Using Google Generative AI model")
 
 elif model_choice == "OpenAI":
     api_key = st.text_input("Enter your OpenAI API key:", type="password")
@@ -35,14 +36,17 @@ elif model_choice == "OpenAI":
         st.stop()
     embeddings_model = OpenAIEmbeddings(api_key=api_key, model='text-embedding-ada-002')
     chat_model = ChatOpenAI(api_key=api_key, model_name="gpt-3.5-turbo", temperature=0.8, max_tokens=None, timeout=None, max_retries=2)
+    print("Using OpenAI model")
 
 elif model_choice == "Local LLM (Ollama)":
     embeddings_model = OllamaEmbeddings(model="nomic-embed-text", show_progress=True)
     chat_model = ChatOllama(model='mistral')
+    print("Using Local LLM (Ollama) model")
 
 # Set up ChromaDB client if not already initialized
 if 'chroma_client' not in st.session_state:
     try:
+        print("Initializing ChromaDB client")
         st.session_state['chroma_client'] = chromadb.Client(settings=chromadb.config.Settings(persist_directory="./chroma_db", anonymized_telemetry=False))
     except ValueError as e:
         st.error(f"An error occurred while setting up ChromaDB client: {e}")
@@ -53,9 +57,11 @@ chroma_client = st.session_state['chroma_client']
 # Set up ChromaDB collection
 if 'chroma_collection' not in st.session_state:
     try:
+        print("Creating ChromaDB collection: document_embeddings")
         st.session_state['chroma_collection'] = chroma_client.create_collection(name="document_embeddings")
     except Exception as e:
         if 'already exists' in str(e).lower():
+            print("ChromaDB collection already exists. Retrieving collection: document_embeddings")
             st.session_state['chroma_collection'] = chroma_client.get_collection(name="document_embeddings")
         else:
             st.error("An error occurred while creating or accessing the collection.")
@@ -67,23 +73,39 @@ uploaded_files = st.file_uploader("Upload your PDF or TXT files", type=["pdf", "
 
 # Helper Functions
 def extract_text_from_pdf(file):
+    print(f"Extracting text from PDF: {file.name}")
     pdf_reader = PdfReader(file)
     text = ""
     for page in pdf_reader.pages:
-        text += page.extract_text() or ""
+        try:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text
+            else:
+                st.warning(f"Warning: Could not extract text from one of the pages in {file.name}")
+        except Exception as e:
+            st.warning(f"Warning: An error occurred while extracting text from a page in {file.name}: {e}")
+    print(f"Extracted text length from {file.name}: {len(text)} characters")
     return text
 
 def extract_text_from_txt(file):
-    return file.read().decode("utf-8")
+    print(f"Extracting text from TXT: {file.name}")
+    text = file.read().decode("utf-8")
+    print(f"Extracted text length from {file.name}: {len(text)} characters")
+    return text
 
 def create_embeddings(content):
+    print("Creating embeddings for content")
     embedding_id = str(hash(content))
     embeddings = embeddings_model.embed_query(content)
     chroma_collection.add(ids=[embedding_id], documents=[content], embeddings=[embeddings])
+    print("Embeddings created and added to ChromaDB collection")
 
 def retrieve_relevant_context(query):
+    print(f"Retrieving relevant context for query: {query}")
     query_embedding = embeddings_model.embed_query(query)
     results = chroma_collection.query(query_embeddings=[query_embedding], n_results=5)
+    print(f"Number of relevant documents retrieved: {len(results['documents'])}")
     return [doc[0] if isinstance(doc, list) else doc for doc in results['documents']]
 
 def answer_query_with_context(query, context):
@@ -93,6 +115,7 @@ def answer_query_with_context(query, context):
             HumanMessage(content=f"Context: {context}\nQuestion: {query}\nAnswer:")
         ]
         try:
+            print("Querying model with provided context and question")
             response = chat_model(messages)
         except Exception as e:
             st.error(f"An error occurred while querying the model: {e}")
@@ -101,6 +124,7 @@ def answer_query_with_context(query, context):
     elif model_choice == "Local LLM (Ollama)":
         prompt = f"Context: {context}\nQuestion: {query}\nAnswer:"
         try:
+            print("Querying local LLM with provided context and question")
             response = chat_model.invoke(prompt)
         except Exception as e:
             st.error(f"An error occurred while querying the local LLM: {e}")
@@ -127,12 +151,15 @@ if 'chat_history' not in st.session_state:
 
 user_query = st.text_input("Ask a question based on the uploaded documents:")
 if user_query:
+    print(f"User query received: {user_query}")
     relevant_contexts = retrieve_relevant_context(user_query)
     combined_context = "\n".join(map(str, relevant_contexts))
     answer = answer_query_with_context(user_query, combined_context)
     st.session_state['chat_history'].append((user_query, answer))
+    print(f"Answer generated: {answer}")
 
 # Display Chat History
 for question, response in st.session_state['chat_history']:
     st.write(f"**You:** {question}")
     st.write(f"**Assistant:** {response}")
+    print(f"Chat history - Question: {question}, Response: {response}")
